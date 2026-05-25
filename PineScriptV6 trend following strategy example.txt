@@ -1,0 +1,708 @@
+
+//@version=6
+strategy("sentiment 2", initial_capital=1000, pyramiding = 0, default_qty_value=99,  commission_value=0, commission_type=strategy.commission.percent, default_qty_type=strategy.percent_of_equity, overlay=false)
+
+// Inputs
+array_size_ema = input.int(2000, minval=1, title="EMA Slope Array Size", tooltip="Amount of bars that are averaged", group="EMA Slope")
+
+shorts_enabled = input.bool(false, 'shorts_enabled', group="trading")
+longs_enabled = input.bool(true, 'longs_enabled', group="trading")
+
+trading_enabled = input.bool(true, 'trading_enabled', group="trading")
+long_thresh_entry = input.float(0.8, "long_thresh_entry", step=0.001, group="trading")
+short_thresh_entry = input.float(0.1, "short_thresh_entry", step=0.001, group="trading")
+
+long_thresh_exit = input.float(0.7, "long_thresh_exit", step=0.001, group="trading")
+short_thresh_exit = input.float(0.2, "short_thresh_exit", step=0.001, group="trading")
+
+trading_mode = input.int(2, 'trading_mode entry', group="trading")
+
+hline(long_thresh_entry, color = color.green)
+hline(short_thresh_entry, color = color.red)
+
+ema_enabled = input.bool(true, 'ema_enabled', group="EMAs")
+average_periods = input.int(200, "EMA Length Slow", step=1, group="EMAs")
+average_periods1 = input.int(150, "EMA Length Medium", step=1, group="EMAs")
+average_periods2 = input.int(100, "EMA Length Fast", step=1, group="EMAs")
+average_periods3 = input.int(50, "EMA Length Ultra-Fast", step=1, group="EMAs")
+
+
+hma_enabled = input.bool(true, 'hma_enabled', group="hma")
+
+hl_enabled = input.bool(true, 'hl_enabled', group="hl")
+hl_sma_length = input.int(1, "hl_sma_length", step=1, group="hl")
+hl_length1 = input.int(125, "hl legth 1", step=1, group="hl")
+hl_length2 = input.int(100, "hl legth 2", step=1, group="hl")
+hl_length3 = input.int(75, "hl legth 3", step=1, group="hl")
+hl_length4 = input.int(50, "hl legth 4", step=1, group="hl")
+
+super_enabled = input.bool(true, 'super_enabled', group="super")
+atrPeriod_S1 = input.int(10, "ATR Length 1", minval=1, group="super")
+factor_S1 = input.float(3.0, "Factor 1", minval=0.01, step=0.01, group="super")
+atrPeriod_S2 = input.int(10, "ATR Length 2", minval=1, group="super")
+factor_S2 = input.float(4.0, "Factor 2", minval=0.01, step=0.01, group="super")
+atrPeriod_S3 = input.int(10, "ATR Length 3", minval=1, group="super")
+factor_S3 = input.float(6.0, "Factor 3", minval=0.01, step=0.01, group="super")
+atrPeriod_S4 = input.int(10, "ATR Length 4", minval=1, group="super")
+factor_S4 = input.float(8.0, "Factor 4", minval=0.01, step=0.01, group="super")
+
+sar_enabled = input.bool(true, 'sar_enabled', group="sar")
+start_SAR_1 = input(0.001, group="sar")
+increment_SAR_1 = input(0.001, group="sar")
+maximum_SAR_1 = input(0.1, "Max Value", group="sar")
+start_SAR_2 = input(0.0008, group="sar")
+increment_SAR_2 = input(0.0008, group="sar")
+maximum_SAR_2 = input(0.008, "Max Value", group="sar")
+start_SAR_3 = input(0.0005, group="sar")
+increment_SAR_3 = input(0.0005, group="sar")
+maximum_SAR_3 = input(0.005, "Max Value", group="sar")
+start_SAR_4 = input(0.001, group="sar")
+increment_SAR_4 = input(0.001, group="sar")
+maximum_SAR_4 = input(0.01, "Max Value", group="sar")
+
+
+count = 0
+total_percentage = 0.0
+
+sentiment_p = 0.0
+sentiment_n = 0.0
+sentiment_neu = 0.0
+
+// Function to calculate EMA slope, manage arrays, and compute normalized percentage
+calculate_ema_slope_percentage(_src, _length, _array_size) =>
+    ema = ta.ema(_src, _length)
+    slope = ema - ema[1]
+    stdev_slope = ta.stdev(slope, 1000)
+    normalized_slope = slope / stdev_slope
+    
+    // Create arrays for positive and negative slopes
+    var float[] up_ema_slope = array.new_float(1, 0)
+    var float[] down_ema_slope = array.new_float(1, 0)
+    
+    // Update arrays
+    if normalized_slope > 0
+        array.push(up_ema_slope, normalized_slope)
+        if array.size(up_ema_slope) > _array_size
+            array.shift(up_ema_slope)
+    if normalized_slope < 0
+        array.push(down_ema_slope, normalized_slope)
+        if array.size(down_ema_slope) > _array_size
+            array.shift(down_ema_slope)
+    
+    // Calculate averages
+    up_avg = array.avg(up_ema_slope)
+    down_avg = array.avg(down_ema_slope)
+    
+    // Normalize slope to percentage
+    percentage = 0.5
+    if (normalized_slope < up_avg and normalized_slope > down_avg)
+        percentage := ((normalized_slope - down_avg) / (up_avg - down_avg))
+    else
+        if normalized_slope > up_avg
+            percentage := 1
+        else
+            percentage := 0
+    
+    percentage
+
+if ema_enabled
+    percentage = calculate_ema_slope_percentage(hl2, average_periods, array_size_ema)
+    percentage1 = calculate_ema_slope_percentage(hl2, average_periods1, array_size_ema)
+    percentage2 = calculate_ema_slope_percentage(hl2, average_periods2, array_size_ema)
+    percentage3 = calculate_ema_slope_percentage(hl2, average_periods3, array_size_ema)
+    if percentage ==1
+        sentiment_p += 1
+    else 
+        if percentage ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if percentage1 ==1
+        sentiment_p += 1
+    else 
+        if percentage1 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if percentage2 ==1
+        sentiment_p += 1
+    else 
+        if percentage2 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if percentage3 ==1
+        sentiment_p += 1
+    else 
+        if percentage3 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+
+    total_percentage += (percentage + percentage1 + percentage2 + percentage3)
+    count += 4
+
+
+
+// Function to calculate EMA slope, manage arrays, and compute normalized percentage
+calculate_hma_slope_percentage(_src, _length, _array_size) =>
+    ema = ta.hma(_src, _length)
+    slope = ema - ema[1]
+    stdev_slope = ta.stdev(slope, 1000)
+    normalized_slope = slope / stdev_slope
+    
+    // Create arrays for positive and negative slopes
+    var float[] up_ema_slope = array.new_float(1, 0)
+    var float[] down_ema_slope = array.new_float(1, 0)
+    
+    // Update arrays
+    if normalized_slope > 0
+        array.push(up_ema_slope, normalized_slope)
+        if array.size(up_ema_slope) > _array_size
+            array.shift(up_ema_slope)
+    if normalized_slope < 0
+        array.push(down_ema_slope, normalized_slope)
+        if array.size(down_ema_slope) > _array_size
+            array.shift(down_ema_slope)
+    
+    // Calculate averages
+    up_avg = array.avg(up_ema_slope)
+    down_avg = array.avg(down_ema_slope)
+    
+    // Normalize slope to percentage
+    percentage = 0.5
+    if (normalized_slope < up_avg and normalized_slope > down_avg)
+        percentage := ((normalized_slope - down_avg) / (up_avg - down_avg))
+    else
+        if normalized_slope > up_avg
+            percentage := 1
+        else
+            percentage := 0
+    
+    percentage
+
+if hma_enabled
+    hma_percentage = calculate_hma_slope_percentage(hl2, average_periods, array_size_ema)
+    hma_percentage1 = calculate_hma_slope_percentage(hl2, average_periods1, array_size_ema)
+    hma_percentage2 = calculate_hma_slope_percentage(hl2, average_periods2, array_size_ema)
+    hma_percentage3 = calculate_hma_slope_percentage(hl2, average_periods3, array_size_ema)
+    total_percentage += (hma_percentage + hma_percentage1 + hma_percentage2 + hma_percentage3)
+    count += 4
+    if hma_percentage ==1
+        sentiment_p += 1
+    else 
+        if hma_percentage ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if hma_percentage1 ==1
+        sentiment_p += 1
+    else 
+        if hma_percentage1 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if hma_percentage2 ==1
+        sentiment_p += 1
+    else 
+        if hma_percentage2 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if hma_percentage3 ==1
+        sentiment_p += 1
+    else 
+        if hma_percentage3 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+
+
+calculate_hl_slope_percentage(_src, _length, _array_size) =>
+    ema = ta.sma(_src, _length)
+    slope = close - ema
+    stdev_slope = ta.stdev(slope, 1000)
+    normalized_slope = slope / stdev_slope
+    
+    // Create arrays for positive and negative slopes
+    var float[] up_ema_slope = array.new_float(1, 0)
+    var float[] down_ema_slope = array.new_float(1, 0)
+    
+    // Update arrays
+    if normalized_slope > 0
+        array.push(up_ema_slope, normalized_slope)
+        if array.size(up_ema_slope) > _array_size
+            array.shift(up_ema_slope)
+    if normalized_slope < 0
+        array.push(down_ema_slope, normalized_slope)
+        if array.size(down_ema_slope) > _array_size
+            array.shift(down_ema_slope)
+    
+    // Calculate averages
+    up_avg = array.avg(up_ema_slope)
+    down_avg = array.avg(down_ema_slope)
+    
+    // Normalize slope to percentage
+    percentage = 0.5
+    if (normalized_slope < up_avg and normalized_slope > down_avg)
+        percentage := ((normalized_slope - down_avg) / (up_avg - down_avg))
+    else
+        if normalized_slope > up_avg
+            percentage := 1
+        else
+            percentage := 0
+    
+    percentage
+
+hl_1 = (ta.highest(hl_length1)+ta.lowest(hl_length1)) /2
+hl_2 = (ta.highest(hl_length2)+ta.lowest(hl_length2)) /2
+hl_3 = (ta.highest(hl_length3)+ta.lowest(hl_length3)) /2
+hl_4 = (ta.highest(hl_length4)+ta.lowest(hl_length4)) /2
+
+
+if hl_enabled
+    hl_percentage1 = calculate_hl_slope_percentage(hl_1, hl_sma_length, array_size_ema)
+    hl_percentage2 = calculate_hl_slope_percentage(hl_2, hl_sma_length, array_size_ema)
+    hl_percentage3 = calculate_hl_slope_percentage(hl_3, hl_sma_length, array_size_ema)
+    hl_percentage4 = calculate_hl_slope_percentage(hl_4, hl_sma_length, array_size_ema)
+    total_percentage += (hl_percentage1 + hl_percentage2 + hl_percentage3 + hl_percentage4)
+    count += 4
+    if hl_percentage1 ==1
+        sentiment_p += 1
+    else 
+        if hl_percentage1 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if hl_percentage2 ==1
+        sentiment_p += 1
+    else 
+        if hl_percentage2 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if hl_percentage3 ==1
+        sentiment_p += 1
+    else 
+        if hl_percentage3 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if hl_percentage4 ==1
+        sentiment_p += 1
+    else 
+        if hl_percentage4 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+
+
+
+calculate_super_slope_percentage(atrPeriod, factor, _array_size) =>
+    [ema, direction_S1] = ta.supertrend(factor, atrPeriod)
+    slope = close - ema
+    stdev_slope = ta.stdev(slope, 1000)
+    normalized_slope = slope / stdev_slope
+    
+    // Create arrays for positive and negative slopes
+    var float[] up_ema_slope = array.new_float(1, 0)
+    var float[] down_ema_slope = array.new_float(1, 0)
+    
+    // Update arrays
+    if normalized_slope > 0
+        array.push(up_ema_slope, normalized_slope)
+        if array.size(up_ema_slope) > _array_size
+            array.shift(up_ema_slope)
+    if normalized_slope < 0
+        array.push(down_ema_slope, normalized_slope)
+        if array.size(down_ema_slope) > _array_size
+            array.shift(down_ema_slope)
+    
+    // Calculate averages
+    up_avg = array.avg(up_ema_slope)
+    down_avg = array.avg(down_ema_slope)
+    
+    // Normalize slope to percentage
+    percentage = 0.5
+    if (normalized_slope < up_avg and normalized_slope > down_avg)
+        percentage := ((normalized_slope - down_avg) / (up_avg - down_avg))
+    else
+        if normalized_slope > up_avg
+            percentage := 1
+        else
+            percentage := 0
+    
+    percentage
+
+
+
+if super_enabled
+    super_percentage1 = calculate_super_slope_percentage(atrPeriod_S1, factor_S1, array_size_ema)
+    super_percentage2 = calculate_super_slope_percentage(atrPeriod_S2, factor_S2, array_size_ema)
+    super_percentage3 = calculate_super_slope_percentage(atrPeriod_S3, factor_S3, array_size_ema)
+    super_percentage4 = calculate_super_slope_percentage(atrPeriod_S4, factor_S4, array_size_ema)
+    total_percentage += (super_percentage1 + super_percentage2 + super_percentage3 + super_percentage4)
+    count += 4
+    if super_percentage1 ==1
+        sentiment_p += 1
+    else 
+        if super_percentage1 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if super_percentage2 ==1
+        sentiment_p += 1
+    else 
+        if super_percentage2 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if super_percentage3 ==1
+        sentiment_p += 1
+    else 
+        if super_percentage3 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if super_percentage4 ==1
+        sentiment_p += 1
+    else 
+        if super_percentage4 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+
+
+calculate_sar_slope_percentage(start, increment, max, _array_size) =>
+    ema = ta.sar(start, increment, max)
+    slope = close - ema
+    stdev_slope = ta.stdev(slope, 1000)
+    normalized_slope = slope / stdev_slope
+    
+    // Create arrays for positive and negative slopes
+    var float[] up_ema_slope = array.new_float(1, 0)
+    var float[] down_ema_slope = array.new_float(1, 0)
+    
+    // Update arrays
+    if normalized_slope > 0
+        array.push(up_ema_slope, normalized_slope)
+        if array.size(up_ema_slope) > _array_size
+            array.shift(up_ema_slope)
+    if normalized_slope < 0
+        array.push(down_ema_slope, normalized_slope)
+        if array.size(down_ema_slope) > _array_size
+            array.shift(down_ema_slope)
+    
+    // Calculate averages
+    up_avg = array.avg(up_ema_slope)
+    down_avg = array.avg(down_ema_slope)
+    
+    // Normalize slope to percentage
+    percentage = 0.5
+    if (normalized_slope < up_avg and normalized_slope > down_avg)
+        percentage := ((normalized_slope - down_avg) / (up_avg - down_avg))
+    else
+        if normalized_slope > up_avg
+            percentage := 1
+        else
+            percentage := 0
+    
+    percentage
+
+
+if sar_enabled
+    sar_percentage1 = calculate_sar_slope_percentage(start_SAR_1, increment_SAR_1, maximum_SAR_1, array_size_ema)
+    sar_percentage2 = calculate_sar_slope_percentage(start_SAR_2, increment_SAR_2, maximum_SAR_2, array_size_ema)
+    sar_percentage3 = calculate_sar_slope_percentage(start_SAR_3, increment_SAR_3, maximum_SAR_3, array_size_ema)
+    sar_percentage4 = calculate_sar_slope_percentage(start_SAR_4, increment_SAR_4, maximum_SAR_4, array_size_ema)
+    total_percentage += (sar_percentage1 + sar_percentage2 + sar_percentage3 + sar_percentage4)
+    count += 4
+    if sar_percentage1 ==1
+        sentiment_p += 1
+    else 
+        if sar_percentage1 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if sar_percentage2 ==1
+        sentiment_p += 1
+    else 
+        if sar_percentage2 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if sar_percentage3 ==1
+        sentiment_p += 1
+    else 
+        if sar_percentage3 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+    if sar_percentage4 ==1
+        sentiment_p += 1
+    else 
+        if sar_percentage4 ==0
+            sentiment_n += 1
+        else
+            sentiment_neu += 1
+
+total_percentage := total_percentage / count
+
+// Function to calculate PSAR
+psar(start, inc, maximum, source) =>
+    var float minTick = 0  // Minimum tick value
+    var float out = na  // Output SAR
+    var int pos = na  // Current position: 1 for uptrend, -1 for downtrend
+    var float maxMin = na  // Maximum or Minimum Extreme Point
+    var float acc = na  // Acceleration Factor
+    var float prev = na  // Previous SAR value
+    var bool outSet = false  // Flag to check if SAR is updated
+
+    // Initialization
+    if bar_index >= 1
+        prev := out[1]
+        outSet := false
+        if bar_index == 1
+            // Set initial values based on the trend
+            if source > source[1]
+                pos := 1
+                maxMin := math.max(source, source[1])
+                prev := math.min(source, source[1])
+            else
+                pos := -1
+                maxMin := math.min(source, source[1])
+                prev := math.max(source, source[1])
+            
+            acc := start
+        else
+            // Carry forward previous values
+            pos := pos[1]
+            acc := acc[1]
+            maxMin := maxMin[1]
+
+        // Update logic for uptrend
+        if pos == 1
+            if source > maxMin
+                maxMin := source
+                acc := math.min(acc + inc, maximum)
+            
+            if source <= prev
+                pos := -1
+                out := maxMin
+                maxMin := source
+                acc := start
+                outSet := true
+        else
+            // Update logic for downtrend
+            if source < maxMin
+                maxMin := source
+                acc := math.min(acc + inc, maximum)
+            
+            if source >= prev
+                pos := 1
+                out := maxMin
+                maxMin := source
+                acc := start
+                outSet := true
+
+        // Default SAR calculation
+        if not outSet
+            out := prev + acc * (maxMin - prev)
+
+            if pos == 1 and out >= source
+                out := source - minTick
+            
+            if pos == -1 and out <= source
+                out := source + minTick
+
+    out
+
+// Inputs for PSAR parameters
+start = input.float(0.02, title="Start AF", minval=0.01, step=0.01)
+increment = input.float(0.02, title="Increment AF", minval=0.01, step=0.01)
+maximum = input.float(0.2, title="Maximum AF", minval=0.01, step=0.01)
+
+
+// Calculate PSAR with custom source
+p = psar(start, increment, maximum, total_percentage)
+
+sar_color = color.gray
+if p > total_percentage
+    sar_color := color.red
+if p < total_percentage
+    sar_color := color.green
+
+plot(p, style=plot.style_circles, color=sar_color, title="PSAR with Custom Source")
+
+
+
+// Inputs
+length = input.int(200, title="ATR Length", minval=1, tooltip="Length for ATR calculation")
+
+// Calculate True Range (TR) for `total_percentage`
+tr1 = math.abs(total_percentage - total_percentage[1])  // Current - Previous
+tr = tr1  // Only one component for custom `total_percentage`
+
+// Calculate ATR using smoothing
+atr = ta.sma(tr, length)
+
+// Plot ATR
+plot(atr, title="Custom ATR", color=color.new(color.blue, 0), linewidth=2)
+
+
+multiplier = input.float(3.0, title="Multiplier", minval=0.1, step=0.1, tooltip="Multiplier for ATR")
+source = input.source(close, title="Source", tooltip="Select input source for the Supertrend")
+
+
+// Calculate basic bands using `total_percentage` as the source
+basicUpperBand = total_percentage + (multiplier * atr)
+basicLowerBand = total_percentage - (multiplier * atr)
+
+// Variables for dynamic upper and lower bands
+var float upperBand = na
+var float lowerBand = na
+var bool isUpTrend = false  // Trend direction
+
+// Update upper and lower bands
+if na(upperBand)
+    upperBand := basicUpperBand
+    lowerBand := basicLowerBand
+else
+    upperBand := basicUpperBand < upperBand[1] or total_percentage[1] > upperBand[1] ? basicUpperBand : upperBand[1]
+    lowerBand := basicLowerBand > lowerBand[1] or total_percentage[1] < lowerBand[1] ? basicLowerBand : lowerBand[1]
+
+
+if isUpTrend
+    isUpTrend := total_percentage > lowerBand ? true : false
+else
+    isUpTrend := total_percentage < upperBand ? false : true
+
+// Calculate Supertrend line
+superTrend = isUpTrend ? lowerBand : upperBand
+
+// Plot Supertrend
+plot(superTrend, title="Supertrend", color=isUpTrend ? color.green : color.red, linewidth=1, style=plot.style_line)
+
+
+sentiment_n := ta.sma(sentiment_n, 10)
+sentiment_neu := ta.sma(sentiment_neu, 10)
+sentiment_p := ta.sma(sentiment_p, 10)
+
+plot(sentiment_n + 2, title="sentiment_n", color=color.red, linewidth=1, style=plot.style_stepline)
+plot(sentiment_neu + 2, title="sentiment_n", color=color.blue, linewidth=1, style=plot.style_stepline)
+plot(sentiment_p + 2, title="sentiment_n", color=color.green, linewidth=1, style=plot.style_stepline)
+
+
+
+
+
+if trading_enabled 
+    if trading_mode == 1
+        if p < total_percentage  and longs_enabled
+            strategy.entry('L', strategy.long)
+        else
+            strategy.close('L')
+
+        if p > total_percentage  and shorts_enabled
+            strategy.entry('S', strategy.short)
+        else
+            strategy.close('S')
+
+    if trading_mode == 2
+        if total_percentage >= long_thresh_entry and longs_enabled
+            strategy.entry('L', strategy.long)
+        else
+            strategy.close('L')
+
+        if total_percentage <= short_thresh_entry and shorts_enabled
+            strategy.entry('S', strategy.short)
+        else
+            strategy.close('S')
+
+    if trading_mode == 3
+        if p < total_percentage and total_percentage >= long_thresh_entry and longs_enabled
+            strategy.entry('L', strategy.long)
+        else
+            strategy.close('L')
+
+        if p > total_percentage and total_percentage <= short_thresh_entry  and shorts_enabled
+            strategy.entry('S', strategy.short)
+        else
+            strategy.close('S')
+    
+    if trading_mode == 4
+        if p < total_percentage and total_percentage >= long_thresh_entry and longs_enabled
+            strategy.entry('L', strategy.long)
+        if total_percentage <= long_thresh_exit
+            strategy.close('L')
+
+        if p > total_percentage and total_percentage <= short_thresh_entry  and shorts_enabled
+            strategy.entry('S', strategy.short)
+        if total_percentage >= short_thresh_exit
+            strategy.close('S')
+
+    if trading_mode == 5
+        if isUpTrend  and longs_enabled
+            strategy.entry('L', strategy.long)
+        else
+            strategy.close('L')
+
+        if not isUpTrend  and shorts_enabled
+            strategy.entry('S', strategy.short)
+        else
+            strategy.close('S')
+
+    if trading_mode == 6
+        if isUpTrend and total_percentage >= long_thresh_entry and longs_enabled
+            strategy.entry('L', strategy.long)
+        if total_percentage <= long_thresh_exit
+            strategy.close('L')
+
+        if not isUpTrend and total_percentage <= short_thresh_entry and shorts_enabled
+            strategy.entry('S', strategy.short)
+        if total_percentage >= short_thresh_exit
+            strategy.close('S')
+
+    if trading_mode == 7
+        if sentiment_n < sentiment_p and sentiment_neu/2  < sentiment_p and longs_enabled
+            strategy.entry('L', strategy.long)
+        else
+            strategy.close('L')
+
+        if sentiment_p < sentiment_n and sentiment_neu/2 < sentiment_n and shorts_enabled
+            strategy.entry('S', strategy.short)
+        else
+            strategy.close('S')
+
+    if trading_mode == 8
+        if sentiment_n < sentiment_p and sentiment_neu  < sentiment_p and longs_enabled
+            strategy.entry('L', strategy.long)
+        else
+            strategy.close('L')
+
+        if sentiment_p < sentiment_n and sentiment_neu < sentiment_n and shorts_enabled
+            strategy.entry('S', strategy.short)
+        else
+            strategy.close('S')
+
+    if trading_mode == 9
+        if sentiment_n < sentiment_p and longs_enabled
+            strategy.entry('L', strategy.long)
+        else
+            strategy.close('L')
+
+        if sentiment_p < sentiment_n and shorts_enabled
+            strategy.entry('S', strategy.short)
+        else
+            strategy.close('S')
+
+    if trading_mode == 10
+        if p > 0.51  and longs_enabled
+            strategy.entry('L', strategy.long)
+        else
+            strategy.close('L')
+
+        if p < 0.49  and shorts_enabled
+            strategy.entry('S', strategy.short)
+        else
+            strategy.close('S')
