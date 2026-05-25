@@ -1,6 +1,6 @@
 
 # PineScriptV6-trend-following-strategy-example
-PineScriptV6 trend following strategy example that uses multiple trend following  indicators to get a sentiment of trend and momentum. This is example code to learn from not live trading!
+PineScriptV6 trend following strategy example that uses multiple trend following  indicators to get a sentiment of trend and momentum. This is example code to learn from, not live trading! can be used on any timeframe but designed for 1h, 2h, 4h!
 
 <img width="1494" height="777" alt="Capture23123" src="https://github.com/user-attachments/assets/bbe871b9-f865-4c64-a6e2-9ef0f917f8c8" />
 
@@ -159,8 +159,6 @@ The `trading_mode` input controls how entries and exits are generated.
 4. Save the script.
 5. Add it to a chart.
 6. Open the strategy settings and adjust the inputs for your market and timeframe.
-7. Review the Strategy Tester results.
-8. Forward-test before considering live use.
 
 ## Suggested Backtesting Workflow
 
@@ -182,15 +180,3 @@ The `trading_mode` input controls how entries and exits are generated.
 ## Risk Warning
 
 Algorithmic trading strategies can lose money. Backtested performance does not guarantee future results. Use proper risk management, avoid overfitting, and test thoroughly before trading live.
-
-## License
-
-Add your preferred license here. For example:
-
-```text
-MIT License
-```
-
-## Author
-
-Created for a TradingView Pine Script sentiment strategy project.
